@@ -1,16 +1,12 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Collections;
 using UnityEngine.UI;
 using UnityEngine;
 
 public class SelectionManager : MonoBehaviour
 {
-    [Header("Debuging-Tools")]
-    public Transform Destination; // Transform, as states, a transform that can be used to be customized through code (DON'T REMOVE)
-    public GameObject FOV;
-
     [Header("Active-Vars")]
-    public List<Unit> activeUnits = new List<Unit>(); // Exclusive to movable units, not buildings or resources, used primary for formations and actions
+    public List<Unit> ActiveUnits = new List<Unit>(); // Exclusive to movable units, not buildings or resources, used primary for formations and actions
     public List<Unit> Units = new List<Unit>();
 
     // Private Vars
@@ -25,7 +21,7 @@ public class SelectionManager : MonoBehaviour
 
     void Start()
     {
-        c = GetComponent<Camera>();
+        c = FindObjectOfType<Camera>();
     }
 
     // Delta Calc.
@@ -55,23 +51,9 @@ public class SelectionManager : MonoBehaviour
 
             tdc = Time.time;
         }
-        if (Input.GetKeyUp(KeyCode.Mouse1) && activeUnits.Count > 0) // Action
+        if (Input.GetKeyUp(KeyCode.Mouse1) && ActiveUnits.Count > 0) // Action
         {
             ActionManager();
-        }
-
-        // DEBUG (CAN REMOVE)
-
-        if (Input.GetKeyUp(KeyCode.P)) // Disable / Enable FOW
-        {
-            Projector p = FindObjectOfType<Projector>();
-
-            if (!p.enabled) { p.enabled = true; } else { p.enabled = false; }
-        }
-        if (Input.GetKeyUp(KeyCode.L)) // Lighten map (unexplored.)
-        {
-            GameObject FOVobj = Instantiate(FOV, Vector3.zero, Quaternion.identity);
-            FOVobj.transform.localScale = new Vector3(1000, 1000, 1000); Destroy(FOVobj, 0.1f);
         }
     }
 
@@ -99,23 +81,30 @@ public class SelectionManager : MonoBehaviour
         Vector2 min = selectionBox.anchoredPosition - (selectionBox.sizeDelta / 2);
         Vector2 max = selectionBox.anchoredPosition + (selectionBox.sizeDelta / 2);
 
+        bool PrioritizedUnitsExist = false; // Do prioritized units exist in within the selection box?
+
         for (int i = 0; i < Units.Count; i++)
         {
-            Vector3 screenPos = GetComponent<Camera>().WorldToScreenPoint(Units[i].transform.position);
+            Vector3 screenPos = FindObjectOfType<Camera>().WorldToScreenPoint(Units[i].transform.position);
 
             if (screenPos.x > min.x && screenPos.x < max.x && screenPos.y > min.y && screenPos.y < max.y)
             {
-                if (Units[i].unitType != unitType.Building && Units[i].unitType != unitType.Resource)
-                    if (!Units[i].selected) Units[i].Select();
+                if (Units[i].UnitType != UnitType.Building && Units[i].UnitType != UnitType.Resource)
+                {
+                    if (!Units[i].Selected) Units[i].Select();
+                    if (Units[i].UnitType == UnitType.Unit) PrioritizedUnitsExist = true;
+                }
             }
             else
             {
                 if (!Input.GetKey(KeyCode.LeftShift))
-                    if (Units[i].selected) Units[i].UnSelect();
+                    if (Units[i].Selected) Units[i].UnSelect();           
             }
 
-            if (Units[i].unitType == unitType.Resource) Units[i].UnSelect(); // Resources are standalones whenever selected
+            if (Units[i].UnitType == UnitType.Resource) Units[i].UnSelect(); // Resources are standalones whenever selected
         }
+
+        if (PrioritizedUnitsExist && !Input.GetKey(KeyCode.LeftShift)) foreach (Unit Unit in Units) { if (Unit.UnitType == UnitType.Worker) Unit.UnSelect(); }
     }
 
     // SELECT FUNCTIONS
@@ -135,15 +124,15 @@ public class SelectionManager : MonoBehaviour
             {
                 Unit u = t.GetComponent<Unit>(); singleSelectedUnit = u;
 
-                if (!Input.GetKey(KeyCode.LeftShift) || u.unitType == unitType.Resource)
+                if (!Input.GetKey(KeyCode.LeftShift) || u.UnitType == UnitType.Resource)
                 {
                     for (int i = 0; i < Units.Count; i++)
                     {
-                        if (Units[i].selected) Units[i].UnSelect();
+                        if (Units[i].Selected) Units[i].UnSelect();
                     }
                 }
 
-                if (!u.selected) u.Select();
+                if (!u.Selected) u.Select();
                 else u.UnSelect();
             }
         }
@@ -151,13 +140,13 @@ public class SelectionManager : MonoBehaviour
 
     void SelectAllType() //Select all of one type
     {
-        if (singleSelectedUnit != null && singleSelectedUnit.unitType != unitType.Resource)
+        if (singleSelectedUnit != null && singleSelectedUnit.UnitType != UnitType.Resource)
         {
-            string un = singleSelectedUnit.unitName;
+            string un = singleSelectedUnit.UnitName;
 
             for (int i = 0; i < Units.Count; i++)
             {
-                if (Units[i].unitName == un)
+                if (Units[i].UnitName == un)
                     Units[i].Select();
                 else if (!Input.GetKey(KeyCode.LeftShift))
                     Units[i].UnSelect();
@@ -167,78 +156,38 @@ public class SelectionManager : MonoBehaviour
 
     // ACTION FUNCTIONS
 
-    void ActionManager() 
+    void ActionManager()
     {
         ray = c.ScreenPointToRay(Input.mousePosition);
-        Vector3 centralPosition = Vector3.zero; // =null
+        Vector3 CentralPosition = Vector3.zero; // =null
 
         if (Physics.Raycast(ray, out hit))
         {
-            centralPosition = hit.point;
+            CentralPosition = hit.point;
         }
 
-        if (centralPosition != Vector3.zero)
+        if (CentralPosition != Vector3.zero)
         {
-            // Resetting values
-
-            int xpos, ypos; xpos = 1; ypos = 1;
-
-            for (int c = 0; c < activeUnits.Count; c++) // Determine how many points to create
+            if (ActiveUnits.Count > 1)
             {
-                Transform point = Instantiate(Destination, centralPosition, Quaternion.identity);
+                int count = ActiveUnits.Count;
+                //List<Vector3> DeterminedDestinations = null;
 
-                //Adding Components
-
-                point.gameObject.AddComponent<SphereCollider>(); SphereCollider sc = point.GetComponent<SphereCollider>();
-
-                sc.isTrigger = true;
-
-                point.gameObject.AddComponent<Rigidbody>(); Rigidbody rb = point.GetComponent<Rigidbody>();
-
-                rb.constraints = RigidbodyConstraints.FreezePositionX | RigidbodyConstraints.FreezePositionY | RigidbodyConstraints.FreezePositionZ | 
-                    RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationY | RigidbodyConstraints.FreezeRotationZ;
-
-                // Determine Destination properties
-
-                float pointSizeY = (activeUnits[c].GetComponent<BoxCollider>().size.x + activeUnits[c].GetComponent<BoxCollider>().size.z) / 2;
-                Vector3 pointSize = new Vector3(activeUnits[c].GetComponent<BoxCollider>().size.x, pointSizeY, activeUnits[c].GetComponent<BoxCollider>().size.z);
-                point.localScale = pointSize;
-
-                if (activeUnits.Count > 1)
+                for (int c = 0; c < ActiveUnits.Count; c++)
                 {
-                    //float d = Mathf.Sqrt((pointSize.x * pointSize.z) * 2); // Displacement distance
+                    Unit Unit = ActiveUnits[c];
 
-                    /*
-                    float d = 0.7f;
+                    Vector3 StartingPosition = new Vector3(0, 0, CentralPosition.z - (c / 2) * 2);
+                    Vector3 DeterminedDestination = new Vector3(CentralPosition.x + c * 2, Unit.transform.position.y, StartingPosition.z + c * 2);
+                    //DeterminedDestinations.Add(DeterminedDestination);
 
-                    float ex = Mathf.Sqrt(activeUnits.Count);
-                    xpos++; if (xpos > ex) { xpos = 1; ypos++; }
-
-                    Vector3 startingPosition = new Vector3(centralPosition.x - ((ex * d) / 2), centralPosition.y + 0.25f, centralPosition.z - (ex * d));
-                    Vector3 destinationPosition = new Vector3(startingPosition.x + (xpos * d), startingPosition.y, startingPosition.z + (ypos * d));
-                    point.transform.position = destinationPosition;
-                    */
-
-                    Vector3 destinationPosition = new Vector3((c % 4) + centralPosition.x, centralPosition.y + 0.25f, (c / 4) + centralPosition.z);
-                    point.transform.position = destinationPosition;
+                    Unit.Agent.SetDestination(DeterminedDestination);
+                    //ActiveUnits[c].GetComponent<UnityEngine.AI.NavMeshAgent>().SetDestination(DestinationPosition);
                 }
-                else
-                {
-                    point.transform.position = new Vector3(centralPosition.x, centralPosition.y + 0.25f, centralPosition.z);
-                }
-
-                // Polishing
-
-                point.gameObject.AddComponent<Destination>();
-
-                // Assignments
-
-                activeUnits[c].GetComponent<Unit>().destination = point.GetComponent<Destination>(); //activeUnits[c].GetComponent<Unit>().UpdatePath();
-
-                // Debugging
-
-                point.transform.name = "Destination";
-                
+            }
+            else
+            {
+                ActiveUnits[0].GetComponent<UnityEngine.AI.NavMeshAgent>().SetDestination(CentralPosition);
             }
         }
     }
